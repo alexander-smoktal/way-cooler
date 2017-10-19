@@ -32,39 +32,33 @@ impl LayoutTree {
         }
         let node_ix = self.tree.lookup_id(uuid)
             .ok_or(TreeError::NodeNotFound(uuid))?;
-        let parent_ix = self.tree.parent_of(node_ix)?;
-        match self.tree[parent_ix] {
-            Container::Container { layout, .. } => {
-                match layout {
-                    Layout::Tabbed | Layout::Stacked => {
-                        for child_ix in self.tree.children_of(parent_ix) {
-                            match self.tree[child_ix] {
-                                Container::View { handle, floating, .. } => {
-                                    if child_ix != node_ix && !floating {
-                                        handle.send_to_back();
-                                    }
-                                },
-                                Container::Container { ..}  => {
-                                    // do nothing
-                                },
-                                _ => unreachable!()
-                            }
-                        }
-                    },
-                    _ => {}
-                }
-            }
-            _ => {}
-        }
+
         match self.tree[node_ix] {
             Container::View { handle, .. } => {
                 handle.focus();
                 self.active_container = Some(node_ix);
+                self.tree.set_ancestor_paths_active(node_ix);
+
+                // If we have floating view, place focused view below it, otherwise in front of all windows
+                let parent_ix = self.tree.parent_of(node_ix)?;
+                match self.tree[parent_ix] {
+                    Container::Container { .. } => {
+                        if let Some(Container::View { handle: floating_handle, .. }) = self.tree.floating_children(parent_ix)
+                            .into_iter()
+                            .find(|s| *s != node_ix)
+                            .map(|floating_id| self.tree[floating_id].clone()) {
+                            handle.send_below(floating_handle);
+                            return Ok(())
+                        }
+                    },
+                    _ => {}
+                }
+
+                handle.bring_to_front();
+                Ok(())
             },
             _ => return Err(TreeError::Focus(FocusError::NotAView(uuid)))
         }
-        self.tree.set_ancestor_paths_active(node_ix);
-        Ok(())
     }
     /// Focus on the container relative to the active container.
     ///
